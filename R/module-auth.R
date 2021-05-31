@@ -119,12 +119,22 @@ auth_ui <- function(id, status = "primary", tags_top = NULL,
                 label = lan$get("Password:"),
                 width = "100%"
               ),
+              textInput(
+                inputId = ns("code"),
+                label = lan$get("2FA 6-digit Code: "),
+                width = "100%"
+              ),
               tags$br(),
               actionButton(
                 inputId = ns("go_auth"),
                 label = lan$get("Login"),
-                width = "100%",
+                width = "65%",
                 class = paste0("btn-", status)
+              ),
+              actionLink(
+                inputId = ns("go_2fa"),
+                label = lan$get("Request 2FA Code"),
+                width = "30%"
               ),
               tags$br(), tags$br(),
               tags$script(
@@ -223,13 +233,57 @@ auth_server <- function(input, output, session,
     }
   })
   
+  # -- 2FA --
+  twofactor <- reactiveValues(code = NULL)
+  
+  observe({
+    shinyjs::toggleState("go_2fa", nchar(input$user_id) > 0 & nchar(input$user_pwd) > 0)
+  })
+  
+  # send 2fa code (if username/pswd are correct)
+  observeEvent(input$go_2fa, {
+    removeUI(selector = jns("msg_auth"))
+    res_auth <- check_credentials(input$user_id, input$user_pwd)
+    if (isTRUE(res_auth$result)) {
+      # generate code
+      twofactor$code <- paste(sample(0:9, 6, replace = T), collapse = "")
+      # send code
+      phone_num <- dplyr::case_when(
+        input$user_id %in% c("sam", "scmcclintock") ~ "+17578122144",
+        TRUE ~ "+12157386383"
+      )
+      twilio::tw_send_message(
+        to = phone_num, 
+        from = Sys.getenv("TWILIO_NUMBER"), 
+        body = paste0("Your Aletheia 2FA code is ", twofactor$code)
+        )
+      insertUI(
+        selector = jns("result_auth"),
+        ui = tags$div(
+          id = ns("msg_auth"), class = "alert alert-info",
+          icon("exclamation-triangle"), lan()$get("Code was sent to phone number on file.")
+        )
+      )
+    } else {
+      insertUI(
+        selector = jns("result_auth"),
+        ui = tags$div(
+          id = ns("msg_auth"), class = "alert alert-danger",
+          icon("exclamation-triangle"), lan()$get("Username or password are incorrect")
+        )
+      )
+    }
+    
+  })
+  
   
   authentication <- reactiveValues(result = FALSE, user = NULL, user_info = NULL)
   
   observeEvent(input$go_auth, {
     removeUI(selector = jns("msg_auth"))
     res_auth <- check_credentials(input$user_id, input$user_pwd)
-    if (isTRUE(res_auth$result)) {
+    code_status <- isTRUE(twofactor$code == input$code)
+    if (isTRUE(res_auth$result) & code_status) {
       removeUI(selector = jns("auth-mod"))
       authentication$result <- TRUE
       authentication$user <- input$user_id
@@ -252,6 +306,14 @@ auth_server <- function(input, output, session,
           ui = tags$div(
             id = ns("msg_auth"), class = "alert alert-danger",
             icon("exclamation-triangle"), lan()$get("Username or password are incorrect")
+          )
+        )
+      } else if (!code_status) {
+        insertUI(
+          selector = jns("result_auth"),
+          ui = tags$div(
+            id = ns("msg_auth"), class = "alert alert-danger",
+            icon("exclamation-triangle"), lan()$get("Your 2FA Code is incorrect or missing.")
           )
         )
       } else if (isTRUE(res_auth$expired)) {
