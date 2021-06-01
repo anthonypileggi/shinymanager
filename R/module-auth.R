@@ -254,7 +254,7 @@ auth_server <- function(input, output, session,
       )
       twilio::tw_send_message(
         to = phone_num, 
-        from = Sys.getenv("TWILIO_NUMBER"), 
+        from = "+12153981494", 
         body = paste0("Your Aletheia 2FA code is ", twofactor$code)
         )
       insertUI(
